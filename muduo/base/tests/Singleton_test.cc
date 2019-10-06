@@ -1,11 +1,10 @@
-#include <muduo/base/Singleton.h>
-#include <muduo/base/CurrentThread.h>
-#include <muduo/base/Thread.h>
+#include "muduo/base/Singleton.h"
+#include "muduo/base/CurrentThread.h"
+#include "muduo/base/Thread.h"
 
-#include <boost/noncopyable.hpp>
 #include <stdio.h>
 
-class Test : boost::noncopyable
+class Test : muduo::noncopyable
 {
  public:
   Test()
@@ -23,6 +22,23 @@ class Test : boost::noncopyable
 
  private:
   muduo::string name_;
+};
+
+class TestNoDestroy : muduo::noncopyable
+{
+ public:
+  // Tag member for Singleton<T>
+  void no_destroy();
+
+  TestNoDestroy()
+  {
+    printf("tid=%d, constructing TestNoDestroy %p\n", muduo::CurrentThread::tid(), this);
+  }
+
+  ~TestNoDestroy()
+  {
+    printf("tid=%d, destructing TestNoDestroy %p\n", muduo::CurrentThread::tid(), this);
+  }
 };
 
 void threadFunc()
@@ -44,4 +60,6 @@ int main()
          muduo::CurrentThread::tid(),
          &muduo::Singleton<Test>::instance(),
          muduo::Singleton<Test>::instance().name().c_str());
+  muduo::Singleton<TestNoDestroy>::instance();
+  printf("with valgrind, you should see %zd-byte memory leak.\n", sizeof(TestNoDestroy));
 }

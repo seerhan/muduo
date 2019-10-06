@@ -1,21 +1,23 @@
-#include <muduo/base/Timestamp.h>
+// Use of this source code is governed by a BSD-style license
+// that can be found in the License file.
+//
+// Author: Shuo Chen (chenshuo at chenshuo dot com)
+
+#include "muduo/base/Timestamp.h"
 
 #include <sys/time.h>
 #include <stdio.h>
-#define __STDC_FORMAT_MACROS
-#include <inttypes.h>
-#undef __STDC_FORMAT_MACROS
 
-#include <boost/static_assert.hpp>
+#ifndef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
+#endif
+
+#include <inttypes.h>
 
 using namespace muduo;
 
-BOOST_STATIC_ASSERT(sizeof(Timestamp) == sizeof(int64_t));
-
-Timestamp::Timestamp(int64_t microseconds)
-  : microSecondsSinceEpoch_(microseconds)
-{
-}
+static_assert(sizeof(Timestamp) == sizeof(int64_t),
+              "Timestamp is same size as int64_t");
 
 string Timestamp::toString() const
 {
@@ -28,7 +30,7 @@ string Timestamp::toString() const
 
 string Timestamp::toFormattedString(bool showMicroseconds) const
 {
-  char buf[32] = {0};
+  char buf[64] = {0};
   time_t seconds = static_cast<time_t>(microSecondsSinceEpoch_ / kMicroSecondsPerSecond);
   struct tm tm_time;
   gmtime_r(&seconds, &tm_time);
@@ -56,10 +58,5 @@ Timestamp Timestamp::now()
   gettimeofday(&tv, NULL);
   int64_t seconds = tv.tv_sec;
   return Timestamp(seconds * kMicroSecondsPerSecond + tv.tv_usec);
-}
-
-Timestamp Timestamp::invalid()
-{
-  return Timestamp();
 }
 

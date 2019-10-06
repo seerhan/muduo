@@ -11,11 +11,11 @@
 #ifndef MUDUO_NET_POLLER_H
 #define MUDUO_NET_POLLER_H
 
+#include <map>
 #include <vector>
-#include <boost/noncopyable.hpp>
 
-#include <muduo/base/Timestamp.h>
-#include <muduo/net/EventLoop.h>
+#include "muduo/base/Timestamp.h"
+#include "muduo/net/EventLoop.h"
 
 namespace muduo
 {
@@ -28,7 +28,7 @@ class Channel;
 /// Base class for IO Multiplexing
 ///
 /// This class doesn't own the Channel objects.
-class Poller : boost::noncopyable
+class Poller : noncopyable
 {
  public:
   typedef std::vector<Channel*> ChannelList;
@@ -48,17 +48,24 @@ class Poller : boost::noncopyable
   /// Must be called in the loop thread.
   virtual void removeChannel(Channel* channel) = 0;
 
+  virtual bool hasChannel(Channel* channel) const;
+
   static Poller* newDefaultPoller(EventLoop* loop);
 
-  void assertInLoopThread()
+  void assertInLoopThread() const
   {
     ownerLoop_->assertInLoopThread();
   }
+
+ protected:
+  typedef std::map<int, Channel*> ChannelMap;
+  ChannelMap channels_;
 
  private:
   EventLoop* ownerLoop_;
 };
 
-}
-}
+}  // namespace net
+}  // namespace muduo
+
 #endif  // MUDUO_NET_POLLER_H

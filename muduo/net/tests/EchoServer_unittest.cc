@@ -1,11 +1,9 @@
-#include <muduo/net/TcpServer.h>
+#include "muduo/net/TcpServer.h"
 
-#include <muduo/base/Logging.h>
-#include <muduo/base/Thread.h>
-#include <muduo/net/EventLoop.h>
-#include <muduo/net/InetAddress.h>
-
-#include <boost/bind.hpp>
+#include "muduo/base/Logging.h"
+#include "muduo/base/Thread.h"
+#include "muduo/net/EventLoop.h"
+#include "muduo/net/InetAddress.h"
 
 #include <utility>
 
@@ -25,9 +23,9 @@ class EchoServer
       server_(loop, listenAddr, "EchoServer")
   {
     server_.setConnectionCallback(
-        boost::bind(&EchoServer::onConnection, this, _1));
+        std::bind(&EchoServer::onConnection, this, _1));
     server_.setMessageCallback(
-        boost::bind(&EchoServer::onMessage, this, _1, _2, _3));
+        std::bind(&EchoServer::onMessage, this, _1, _2, _3));
     server_.setThreadNum(numThreads);
   }
 
@@ -43,6 +41,7 @@ class EchoServer
     LOG_TRACE << conn->peerAddress().toIpPort() << " -> "
         << conn->localAddress().toIpPort() << " is "
         << (conn->connected() ? "UP" : "DOWN");
+    LOG_INFO << conn->getTcpInfoString();
 
     conn->send("hello\n");
   }
@@ -75,8 +74,9 @@ int main(int argc, char* argv[])
   {
     numThreads = atoi(argv[1]);
   }
+  bool ipv6 = argc > 2;
   EventLoop loop;
-  InetAddress listenAddr(2000);
+  InetAddress listenAddr(2000, false, ipv6);
   EchoServer server(&loop, listenAddr);
 
   server.start();

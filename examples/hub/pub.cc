@@ -1,7 +1,7 @@
-#include "pubsub.h"
-#include <muduo/base/ProcessInfo.h>
-#include <muduo/net/EventLoop.h>
-#include <muduo/net/EventLoopThread.h>
+#include "examples/hub/pubsub.h"
+#include "muduo/base/ProcessInfo.h"
+#include "muduo/net/EventLoop.h"
+#include "muduo/net/EventLoopThread.h"
 
 #include <iostream>
 #include <stdio.h>
@@ -56,6 +56,7 @@ int main(int argc, char* argv[])
           client.publish(g_topic, line);
         }
         client.stop();
+        CurrentThread::sleepUsec(1000*1000);
       }
       else
       {

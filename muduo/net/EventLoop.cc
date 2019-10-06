@@ -6,19 +6,20 @@
 
 // Author: Shuo Chen (chenshuo at chenshuo dot com)
 
-#include <muduo/net/EventLoop.h>
+#include "muduo/net/EventLoop.h"
 
-#include <muduo/base/Logging.h>
-#include <muduo/base/Mutex.h>
-#include <muduo/net/Channel.h>
-#include <muduo/net/Poller.h>
-#include <muduo/net/SocketsOps.h>
-#include <muduo/net/TimerQueue.h>
+#include "muduo/base/Logging.h"
+#include "muduo/base/Mutex.h"
+#include "muduo/net/Channel.h"
+#include "muduo/net/Poller.h"
+#include "muduo/net/SocketsOps.h"
+#include "muduo/net/TimerQueue.h"
 
-#include <boost/bind.hpp>
+#include <algorithm>
 
 #include <signal.h>
 #include <sys/eventfd.h>
+#include <unistd.h>
 
 using namespace muduo;
 using namespace muduo::net;
@@ -53,7 +54,7 @@ class IgnoreSigPipe
 #pragma GCC diagnostic error "-Wold-style-cast"
 
 IgnoreSigPipe initObj;
-}
+}  // namespace
 
 EventLoop* EventLoop::getEventLoopOfCurrentThread()
 {
@@ -84,7 +85,7 @@ EventLoop::EventLoop()
     t_loopInThisThread = this;
   }
   wakeupChannel_->setReadCallback(
-      boost::bind(&EventLoop::handleRead, this));
+      std::bind(&EventLoop::handleRead, this));
   // we are always reading the wakeupfd
   wakeupChannel_->enableReading();
 }
@@ -93,6 +94,8 @@ EventLoop::~EventLoop()
 {
   LOG_DEBUG << "EventLoop " << this << " of thread " << threadId_
             << " destructs in thread " << CurrentThread::tid();
+  wakeupChannel_->disableAll();
+  wakeupChannel_->remove();
   ::close(wakeupFd_);
   t_loopInThisThread = NULL;
 }
@@ -116,10 +119,9 @@ void EventLoop::loop()
     }
     // TODO sort channel by priority
     eventHandling_ = true;
-    for (ChannelList::iterator it = activeChannels_.begin();
-        it != activeChannels_.end(); ++it)
+    for (Channel* channel : activeChannels_)
     {
-      currentActiveChannel_ = *it;
+      currentActiveChannel_ = channel;
       currentActiveChannel_->handleEvent(pollReturnTime_);
     }
     currentActiveChannel_ = NULL;
@@ -134,7 +136,7 @@ void EventLoop::loop()
 void EventLoop::quit()
 {
   quit_ = true;
-  // There is a chance that loop() just executes while(!quit_) and exists,
+  // There is a chance that loop() just executes while(!quit_) and exits,
   // then EventLoop destructs, then we are accessing an invalid object.
   // Can be fixed using mutex_ in both places.
   if (!isInLoopThread())
@@ -143,51 +145,7 @@ void EventLoop::quit()
   }
 }
 
-void EventLoop::runInLoop(const Functor& cb)
-{
-  if (isInLoopThread())
-  {
-    cb();
-  }
-  else
-  {
-    queueInLoop(cb);
-  }
-}
-
-void EventLoop::queueInLoop(const Functor& cb)
-{
-  {
-  MutexLockGuard lock(mutex_);
-  pendingFunctors_.push_back(cb);
-  }
-
-  if (!isInLoopThread() || callingPendingFunctors_)
-  {
-    wakeup();
-  }
-}
-
-TimerId EventLoop::runAt(const Timestamp& time, const TimerCallback& cb)
-{
-  return timerQueue_->addTimer(cb, time, 0.0);
-}
-
-TimerId EventLoop::runAfter(double delay, const TimerCallback& cb)
-{
-  Timestamp time(addTime(Timestamp::now(), delay));
-  return runAt(time, cb);
-}
-
-TimerId EventLoop::runEvery(double interval, const TimerCallback& cb)
-{
-  Timestamp time(addTime(Timestamp::now(), interval));
-  return timerQueue_->addTimer(cb, time, interval);
-}
-
-#ifdef __GXX_EXPERIMENTAL_CXX0X__
-// FIXME: remove duplication
-void EventLoop::runInLoop(Functor&& cb)
+void EventLoop::runInLoop(Functor cb)
 {
   if (isInLoopThread())
   {
@@ -199,11 +157,11 @@ void EventLoop::runInLoop(Functor&& cb)
   }
 }
 
-void EventLoop::queueInLoop(Functor&& cb)
+void EventLoop::queueInLoop(Functor cb)
 {
   {
   MutexLockGuard lock(mutex_);
-  pendingFunctors_.push_back(std::move(cb));  // emplace_back
+  pendingFunctors_.push_back(std::move(cb));
   }
 
   if (!isInLoopThread() || callingPendingFunctors_)
@@ -212,23 +170,28 @@ void EventLoop::queueInLoop(Functor&& cb)
   }
 }
 
-TimerId EventLoop::runAt(const Timestamp& time, TimerCallback&& cb)
+size_t EventLoop::queueSize() const
+{
+  MutexLockGuard lock(mutex_);
+  return pendingFunctors_.size();
+}
+
+TimerId EventLoop::runAt(Timestamp time, TimerCallback cb)
 {
   return timerQueue_->addTimer(std::move(cb), time, 0.0);
 }
 
-TimerId EventLoop::runAfter(double delay, TimerCallback&& cb)
+TimerId EventLoop::runAfter(double delay, TimerCallback cb)
 {
   Timestamp time(addTime(Timestamp::now(), delay));
   return runAt(time, std::move(cb));
 }
 
-TimerId EventLoop::runEvery(double interval, TimerCallback&& cb)
+TimerId EventLoop::runEvery(double interval, TimerCallback cb)
 {
   Timestamp time(addTime(Timestamp::now(), interval));
   return timerQueue_->addTimer(std::move(cb), time, interval);
 }
-#endif
 
 void EventLoop::cancel(TimerId timerId)
 {
@@ -252,6 +215,13 @@ void EventLoop::removeChannel(Channel* channel)
         std::find(activeChannels_.begin(), activeChannels_.end(), channel) == activeChannels_.end());
   }
   poller_->removeChannel(channel);
+}
+
+bool EventLoop::hasChannel(Channel* channel)
+{
+  assert(channel->ownerLoop() == this);
+  assertInLoopThread();
+  return poller_->hasChannel(channel);
 }
 
 void EventLoop::abortNotInLoopThread()
@@ -291,20 +261,18 @@ void EventLoop::doPendingFunctors()
   functors.swap(pendingFunctors_);
   }
 
-  for (size_t i = 0; i < functors.size(); ++i)
+  for (const Functor& functor : functors)
   {
-    functors[i]();
+    functor();
   }
   callingPendingFunctors_ = false;
 }
 
 void EventLoop::printActiveChannels() const
 {
-  for (ChannelList::const_iterator it = activeChannels_.begin();
-      it != activeChannels_.end(); ++it)
+  for (const Channel* channel : activeChannels_)
   {
-    const Channel* ch = *it;
-    LOG_TRACE << "{" << ch->reventsToString() << "} ";
+    LOG_TRACE << "{" << channel->reventsToString() << "} ";
   }
 }
 
